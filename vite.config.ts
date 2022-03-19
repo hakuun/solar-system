@@ -1,4 +1,5 @@
 import vue from '@vitejs/plugin-vue';
+import Unocss from 'unocss/vite';
 import AutoImport from 'unplugin-auto-import/vite';
 import Components from 'unplugin-vue-components/vite';
 import { defineConfig } from 'vite';
@@ -8,6 +9,9 @@ import { resolve } from 'path';
 export default defineConfig({
   plugins: [
     vue(),
+    Unocss({
+      /* options */
+    }),
     AutoImport({
       dts: './src/auto-import.d.ts',
       imports: ['vue', 'vue-router', 'pinia'],
