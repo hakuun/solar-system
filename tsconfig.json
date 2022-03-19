@@ -11,9 +11,9 @@
     "esModuleInterop": true,
     "lib": ["esnext", "dom"],
     // 非相对模块导入的路径映射配置
-    "paths": {
-      "@/*": ["src/*"]
-    }
+//    "paths": {
+//      "@/*": ["src/*"]
+//    }
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue"],
   "references": [{ "path": "./tsconfig.node.json" }]
