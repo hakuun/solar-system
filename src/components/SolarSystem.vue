@@ -41,7 +41,7 @@ const form = reactive<anyObject>({});
 const plants: Planets = [
   {
     name: 'sun',
-    modelSrc: 'src/assets/models/sun.glb',
+    modelSrc: '/models/sun.glb',
     distance: 0,
     rotationSpeed: 0,
     revolutionSpeed: 0.004,
@@ -50,7 +50,7 @@ const plants: Planets = [
   },
   {
     name: 'mercury',
-    modelSrc: 'src/assets/models/mercury.glb',
+    modelSrc: '/models/mercury.glb',
     distance: 1000 * 6,
     rotationSpeed: 0.015,
     revolutionSpeed: 0.002,
@@ -59,7 +59,7 @@ const plants: Planets = [
   },
   {
     name: 'venus',
-    modelSrc: 'src/assets/models/venus.glb',
+    modelSrc: '/models/venus.glb',
     distance: 1000 * 8,
     rotationSpeed: 0.0065,
     revolutionSpeed: 0.005,
@@ -68,7 +68,7 @@ const plants: Planets = [
   },
   {
     name: 'earth',
-    modelSrc: 'src/assets/models/earth.glb',
+    modelSrc: '/models/earth.glb',
     distance: 1000 * 10,
     rotationSpeed: 0.05,
     revolutionSpeed: 0.01,
