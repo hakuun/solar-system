@@ -1,160 +1,327 @@
 <script setup lang="ts">
 import { effect } from 'vue';
 import {
-  Scene,
-  WebGLRenderer,
-  PerspectiveCamera,
-  DirectionalLight,
   AmbientLight,
-  Group,
-  PointsMaterial,
-  Points,
-  Float32BufferAttribute,
   BufferGeometry,
+  DirectionalLight,
+  Float32BufferAttribute,
+  Group,
+  PerspectiveCamera,
+  Plane,
+  Points,
+  PointsMaterial,
+  Scene,
   Vector3,
+  WebGLRenderer,
 } from 'three';
-import { GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import { GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import WEBGL from 'three/examples/jsm/capabilities/WebGL';
+import Stats from 'stats.js';
 import isWebGLAvailable = WEBGL.isWebGLAvailable;
 import getWebGLErrorMessage = WEBGL.getWebGLErrorMessage;
+import { isMobileDevice } from '../utils';
 
-interface Planet {
+interface PlantType {
+  cnName: string;
   name: string;
-  radius?: number;
   distance: number;
   rotationSpeed: number;
   revolutionSpeed: number;
-  sizeScale?: number;
-  modelSrc: string;
-  group?: Group;
-  parentGroup: Group;
+  sizeScale: number;
 }
-type Planets = Planet[];
-interface anyObject {
-  [key: string]: any;
-}
+type PlantTypes = Array<PlantType>;
+type ModeType = 'third-person' | 'first-person';
 
-const cameraPosition = ref<Vector3>(new Vector3(0, 0, 12000));
-const currentPlant = ref('sun');
-const form = reactive<anyObject>({});
-const plants: Planets = [
+// 天文单位
+const AU = 1495978700;
+// 距离比例 Math.floor((AU * 1000) / 6371)
+const distanceScale = Math.floor(AU / 6371);
+
+const loadingTextList = ref<string[]>([]);
+const loadingText = ref('');
+let controls: PointerLockControls | OrbitControls;
+let moveForward = false;
+let moveBackward = false;
+let moveLeft = false;
+let moveRight = false;
+let canJump = false;
+
+let prevTime = performance.now();
+const velocity = new Vector3();
+const direction = new Vector3();
+const { innerWidth, innerHeight } = window;
+
+const mode = ref<ModeType>('third-person');
+const moveSpeed = ref(50000);
+const showModeSelect = ref(true);
+
+const stats = new Stats();
+const scene = new Scene();
+const camera = new PerspectiveCamera(25, innerWidth / innerHeight, 0.1, Number.MAX_SAFE_INTEGER);
+const renderer = new WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+const directionalLight = new DirectionalLight(0xffffff, 1);
+directionalLight.position.set(-1, 0, 0);
+const ambientLight = new AmbientLight(0xffffff, 0.08);
+scene.add(ambientLight);
+scene.add(directionalLight);
+
+const loader = new GLTFLoader();
+
+const plants: PlantTypes = [
   {
+    cnName: '太阳',
     name: 'sun',
-    modelSrc: '/models/sun.glb',
     distance: 0,
     rotationSpeed: 0,
     revolutionSpeed: 0.004,
-    parentGroup: new Group(),
-    sizeScale: 10,
+    sizeScale: 30,
   },
   {
+    cnName: '水星',
     name: 'mercury',
-    modelSrc: '/models/mercury.glb',
-    distance: 1000 * 6,
+    distance: distanceScale * 0.4,
     rotationSpeed: 0.015,
     revolutionSpeed: 0.002,
-    parentGroup: new Group(),
-    sizeScale: 0.5,
+    sizeScale: 0.383,
   },
   {
+    cnName: '金星',
     name: 'venus',
-    modelSrc: '/models/venus.glb',
-    distance: 1000 * 8,
+    distance: distanceScale * 0.7,
     rotationSpeed: 0.0065,
     revolutionSpeed: 0.005,
-    parentGroup: new Group(),
-    sizeScale: 0.7,
+    sizeScale: 0.95,
   },
+  { cnName: '地球', name: 'earth', distance: distanceScale, rotationSpeed: 0.05, revolutionSpeed: 0.01, sizeScale: 1 },
   {
-    name: 'earth',
-    modelSrc: '/models/earth.glb',
-    distance: 1000 * 10,
-    rotationSpeed: 0.05,
+    cnName: '火星',
+    name: 'mars',
+    distance: distanceScale * 1.5,
+    rotationSpeed: 0.03,
     revolutionSpeed: 0.01,
-    parentGroup: new Group(),
-    sizeScale: 1,
+    sizeScale: 0.532,
   },
-  // {
-  //   name: 'mars',
-  //   modelSrc: 'src/assets/models/mars.glb',
-  //   position: new Vector3(1000 * 4.4, 0, 0),
-  //   rotationSpeed: 0.03,
-  //   revolutionSpeed: 0.01,
-  //   parentGroup: new Group(),
-  //   sizeScale: 0.8,
-  // },
-  // {
-  //   name: 'jupiter',
-  //   modelSrc: 'src/assets/models/jupiter.glb',
-  //   position: new Vector3(1000 * 500, 0, 0),
-  //   rotationSpeed: 0.01,
-  //   revolutionSpeed: 0.08,
-  //   parentGroup: new Group(),
-  //   sizeScale: 50,
-  // },
-  // {
-  //   name: 'saturn',
-  //   modelSrc: 'src/assets/models/saturn.glb',
-  //   position: new Vector3(1000 * 8.8, 0, 0),
-  //   rotationSpeed: 0.02,
-  //   revolutionSpeed: 1.5,
-  //   parentGroup: new Group(),
-  //   sizeScale: 50,
-  // },
-  // {
-  //   name: 'uranus',
-  //   modelSrc: 'src/assets/models/uranus.glb',
-  //   position: new Vector3(1000 * 11.1, 0, 0),
-  //   rotationSpeed: 0.09,
-  //   revolutionSpeed: 1,
-  //   parentGroup: new Group(),
-  //   sizeScale: 30,
-  // },
-  // {
-  //   name: 'neptune',
-  //   modelSrc: 'src/assets/models/neptune.glb',
-  //   position: new Vector3(1000 * 12.3, 0, 0),
-  //   rotationSpeed: 0.01,
-  //   revolutionSpeed: 0.1,
-  //   parentGroup: new Group(),
-  //   sizeScale: 30,
-  // },
 ];
 
-const { innerWidth: width, innerHeight: height } = window;
-const scene = new Scene();
-const loader = new GLTFLoader();
-const camera = new PerspectiveCamera(90, width / height, 0.1, Number.MAX_SAFE_INTEGER);
+function loadPlanet(plant: PlantType) {
+  return new Promise<GLTF>((resolve, reject) => {
+    loader.load(
+      `models/${plant.name}.glb`,
+      (GLTF: GLTF) => {
+        resolve(GLTF);
+      },
+      (xhr) => {
+        const percent = (xhr.loaded / xhr.total) * 100;
+        if (percent === 100) {
+          // loadingTextList.value.push(`${plant.cnName}加载完成`);
+        } else {
+          // loadingTextList.value.push(`${plant.cnName}加载中...${percent.toFixed(2)}%`);
+        }
+        loadingText.value = `${plant.cnName}加载中...${percent.toFixed(2)}%`;
+      },
+      (error) => {
+        reject(error);
+      },
+    );
+  });
+}
 
-// 渲染器
-const renderer = new WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setSize(width, height);
-// 灯光
-const ambientLight = new AmbientLight('0xffffff', 1);
-const directionalLight = new DirectionalLight(0xffffff, 1);
-scene.add(ambientLight);
-scene.add(directionalLight);
-effect(() => {
-  camera.position.set(cameraPosition.value.x, cameraPosition.value.y, cameraPosition.value.z);
-  const plant = plants.find((item) => item.name === currentPlant.value);
-  if (plant) {
-    const { distance, sizeScale, revolutionSpeed, rotationSpeed, parentGroup } = plant;
-    form.distance = distance;
-    form.sizeScale = sizeScale;
-    form.revolutionSpeed = revolutionSpeed;
-    form.rotationSpeed = rotationSpeed;
-    form.parentGroup = parentGroup;
+function loadPlanets() {
+  plants.forEach(async (plant: PlantType) => {
+    try {
+      const { scene: plantGroup } = await loadPlanet(plant);
+      plantGroup.name = plant.name;
+      plantGroup.scale.setScalar(plant.sizeScale);
+      plantGroup.position.set(plant.distance, 0, 0);
+      const parentGroup = new Group();
+      parentGroup.add(plantGroup);
+      scene.add(parentGroup);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      // todo: 加载完成后清除loadingTextList
+      loadingText.value = '';
+    }
+  });
+}
+loadPlanets();
+function updateCamera(camera: PerspectiveCamera, position: Vector3) {
+  camera.position.copy(position);
+  if (controls instanceof OrbitControls) {
+    controls.update();
   }
-});
+}
 
-// 控制器
-const controls = new OrbitControls(camera, renderer.domElement);
+function onKeyDown(event: KeyboardEvent) {
+  switch (event.code) {
+    case 'ArrowUp':
+    case 'KeyW':
+      moveForward = true;
+      break;
 
-function setStartBackground() {
+    case 'ArrowLeft':
+    case 'KeyA':
+      moveLeft = true;
+      break;
+
+    case 'ArrowDown':
+    case 'KeyS':
+      moveBackward = true;
+      break;
+
+    case 'ArrowRight':
+    case 'KeyD':
+      moveRight = true;
+      break;
+
+    case 'Space':
+      if (canJump === true) velocity.y += 350;
+      canJump = false;
+      break;
+    default:
+      break;
+  }
+}
+function onKeyUp(event: KeyboardEvent) {
+  switch (event.code) {
+    case 'ArrowUp':
+    case 'KeyW':
+      moveForward = false;
+      break;
+
+    case 'ArrowLeft':
+    case 'KeyA':
+      moveLeft = false;
+      break;
+
+    case 'ArrowDown':
+    case 'KeyS':
+      moveBackward = false;
+      break;
+
+    case 'ArrowRight':
+    case 'KeyD':
+      moveRight = false;
+      break;
+    default:
+      break;
+  }
+}
+function setControls() {
+  if (mode.value === 'first-person') {
+    controls = new PointerLockControls(camera, document.body);
+    const blocker = document.getElementById('blocker');
+    const instructions = document.getElementById('instructions');
+    if (blocker && instructions) {
+      instructions.addEventListener('click', function () {
+        if (controls instanceof PointerLockControls) {
+          controls.lock();
+        }
+      });
+      controls.addEventListener('lock', function () {
+        instructions.style.display = 'none';
+        blocker.style.display = 'none';
+      });
+
+      controls.addEventListener('unlock', function () {
+        blocker.style.display = 'block';
+        instructions.style.display = '';
+      });
+      scene.add(controls.getObject());
+
+      document.addEventListener('keydown', onKeyDown);
+      document.addEventListener('keyup', onKeyUp);
+    }
+  } else {
+    controls = new OrbitControls(camera, renderer.domElement);
+    // controls.update() // must be called after any manual changes to the camera's transform
+  }
+}
+
+function startFirstPersonMode() {
+  const time = performance.now();
+
+  if (controls instanceof PointerLockControls && controls.isLocked === true) {
+    const delta = (time - prevTime) / 1000;
+
+    velocity.x -= velocity.x * 10.0 * delta;
+    velocity.z -= velocity.z * 10.0 * delta;
+
+    velocity.y -= 9.8 * 100.0 * delta; // 100.0 = mass
+    direction.z = Number(moveForward) - Number(moveBackward);
+    direction.x = Number(moveRight) - Number(moveLeft);
+    direction.normalize(); // this ensures consistent movements in all directions
+
+    if (moveForward || moveBackward) velocity.z -= direction.z * moveSpeed.value * delta;
+    if (moveLeft || moveRight) velocity.x -= direction.x * moveSpeed.value * delta;
+
+    controls.moveRight(-velocity.x * delta);
+    controls.moveForward(-velocity.z * delta);
+
+    controls.getObject().position.y += velocity.y * delta; // new behavior
+
+    if (controls.getObject().position.y < 10) {
+      velocity.y = 0;
+      controls.getObject().position.y = 10;
+      canJump = true;
+    }
+  }
+
+  prevTime = time;
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  if (mode.value === 'first-person') {
+    startFirstPersonMode();
+  }
+  renderer.render(scene, camera);
+  stats.update();
+}
+
+function initFirstPersonMode() {
+  // todo: 设置理想的摄像机位置
+  updateCamera(camera, new Vector3(-5000, 0, 200000));
+}
+
+function initThirdPersonMode() {
+  // todo: 根据选择的行星设置摄像机的位置
+  updateCamera(camera, new Vector3(200000, 0, 12000));
+  const plantNames = plants.map((p) => p.name);
+  scene.traverse((object) => {
+    if (object.name && plantNames.includes(object.name)) {
+      console.log('traverse', object);
+    }
+  });
+  const ambientLight = new AmbientLight(0xffffff, 0.8);
+  scene.add(ambientLight);
+}
+
+function init() {
+  const solarSystemContainer = document.getElementById('solar-system') as HTMLElement;
+  solarSystemContainer.appendChild(renderer.domElement);
+  document.body.appendChild(stats.dom);
+  if (mode.value === 'first-person') {
+    initFirstPersonMode();
+  } else {
+    initThirdPersonMode();
+  }
+  setControls();
+  if (isWebGLAvailable()) {
+    animate();
+  } else {
+    const warning = getWebGLErrorMessage();
+    solarSystemContainer.appendChild(warning);
+  }
+}
+
+function setStartBackground(scene: Scene) {
   // 生成繁星背景
-  const r = 6371;
+  const r = Number.MAX_SAFE_INTEGER;
   const starsGeometry = [new BufferGeometry(), new BufferGeometry()];
 
   const vertices1 = [];
@@ -192,7 +359,7 @@ function setStartBackground() {
     new PointsMaterial({ color: 0x1a1a1a, size: 1, sizeAttenuation: false }),
   ];
 
-  for (let i = 30; i < 10; i += 1) {
+  for (let i = 10; i < 30; i += 1) {
     const stars = new Points(starsGeometry[i % 2], starsMaterials[i % 6]);
 
     stars.rotation.x = Math.random() * 6;
@@ -206,93 +373,72 @@ function setStartBackground() {
     scene.add(stars);
   }
 }
-setStartBackground();
-function loadModel(plant: Planet) {
-  return new Promise<Planet>((resolve, reject) => {
-    loader.load(plant.modelSrc, (gltf: GLTF) => {
-      const model = gltf.scene;
-      // eslint-disable-next-line no-param-reassign
-      plant.group = model;
-      if (plant.sizeScale) {
-        model.scale.setScalar(plant.sizeScale);
-      }
-      model.position.set(plant.distance, 0, 0);
-      plant.parentGroup.add(model);
-      resolve(plant);
-    });
-  });
+setStartBackground(scene);
+function selectMode(selectedMode: ModeType) {
+  showModeSelect.value = false;
+  mode.value = selectedMode;
+  init();
 }
-
-// 加载模型
-plants.forEach(async (plant) => {
-  const loadedPlant = await loadModel(plant);
-  scene.add(loadedPlant.parentGroup);
+onMounted(() => {
+  if (isMobileDevice()) {
+    showModeSelect.value = false;
+    mode.value = 'third-person';
+    init();
+  } else {
+    selectMode('third-person');
+  }
 });
 
-function animate() {
-  requestAnimationFrame(animate);
-  plants.forEach((plant) => {
-    plant.parentGroup.rotation.set(0, plant.parentGroup.rotation.y + plant.rotationSpeed * 0.1, 0);
-    plant?.group?.rotation.set(0, plant.group.rotation.y + plant.revolutionSpeed * 0.1, 0);
-  });
+function screenshot() {
+  //  在截图之前先渲染一下场景和相机，就不会实时刷新屏幕，导致截屏下来的是空白了
   renderer.render(scene, camera);
+  const a = document.createElement('a');
+  a.href = renderer.domElement.toDataURL('image/png');
+  a.download = 'solar-system.png';
+  a.click();
 }
 
-function init() {
-  const container = document.querySelector('#solar-system') as HTMLElement;
-  container?.appendChild(renderer.domElement);
-  container.addEventListener('resize', () => {
-    renderer.setSize(width, height);
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
-  });
-  if (isWebGLAvailable()) {
-    animate();
-  } else {
-    const warning = getWebGLErrorMessage();
-    container?.appendChild(warning);
+document.addEventListener('keydown', (event: KeyboardEvent) => {
+  if (event.ctrlKey && event.code === 'KeyA') {
+    screenshot();
   }
-}
-// watch(form, async () => {
-//   const plant = plants.find((item) => item.name === currentPlant.value);
-//   if (plant) {
-//     scene.remove(plant.parentGroup);
-//     const loadedPlant = await loadModel({ ...plant, ...form });
-//     scene.add(loadedPlant.parentGroup);
-//   }
-// });
-onMounted(() => {
-  init();
 });
 </script>
 
 <template>
   <div class="relative">
-    <div class="absolute right-0 top-0 color-#fff p-20px bg-gray-700/20">
-      <p>调试面板</p>
-      <p>选择行星：</p>
-      <select v-model="currentPlant">
-        <option v-for="plant in plants" :key="plant.name" :label="plant.name">
-          {{ plant.name }}
-        </option>
-      </select>
-
-      <p>参数：</p>
-      <p>大小：<input v-model="form.sizeScale" type="number" /></p>
-      <p>公转速度：<input v-model="form.revolutionSpeed" type="number" /></p>
-      <p>自转速度：<input v-model="form.rotationSpeed" type="number" /></p>
-      <p>距离：<input v-model="form.distance" type="number" /></p>
-      <p>摄像机参数：</p>
-      <p>x:<input v-model="cameraPosition.x" type="number" /></p>
-      <p>y:<input v-model="cameraPosition.y" type="number" /></p>
-      <p>z:<input v-model="cameraPosition.z" type="number" step="500" /></p>
+    <!--    <div-->
+    <!--      v-if="loadingTextList.length"-->
+    <!--      class="max-h-200px overflow-scroll color-#fff absolute top-0 left-50% translate-x&#45;&#45;1/2 z-2"-->
+    <!--    >-->
+    <!--      <p v-for="text in loadingTextList" :key="text" class="font-size-20">{{ text }}</p>-->
+    <!--    </div>-->
+    <p v-if="loadingText" class="color-#fff absolute top-0 left-50% translate-x&#45;&#45;1/2 z-2">
+      {{ loadingText }}
+    </p>
+    <div v-if="showModeSelect" class="w-100vw h-100vh color-#fff absolute left-50% translate-x--1/2 bg-gray-700/20">
+      选择模式：
+      <button @click="selectMode('third-person')">上帝视角</button>
+      <button @click="selectMode('first-person')">第一人称视角</button>
+    </div>
+    <button class="absolute right-0 top-0" @click="screenshot">
+      生成壁纸<template v-if="!isMobileDevice()">(ctrl + A)</template>
+    </button>
+    <div v-show="mode === 'first-person'" id="blocker" class="absolute w-full h-full bg-black/50">
+      <div
+        id="instructions"
+        class="w-full h-full flex cursor-pointer fontSize-14px justify-center items-center flex-col"
+      >
+        <p style="font-size: 36px">点击开始</p>
+        <p>
+          Move: WASD<br />
+          Jump: SPACE<br />
+          Look: MOUSE
+        </p>
+      </div>
     </div>
     <div id="solar-system"></div>
   </div>
 </template>
 
-<style scoped>
-input {
-  width: 100px;
-}
-</style>
+<style scoped></style>
