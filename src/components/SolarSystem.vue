@@ -2,6 +2,7 @@
 import { effect } from 'vue';
 import {
   AmbientLight,
+  AxesHelper,
   BufferGeometry,
   DirectionalLight,
   Float32BufferAttribute,
@@ -23,7 +24,7 @@ import isWebGLAvailable = WEBGL.isWebGLAvailable;
 import getWebGLErrorMessage = WEBGL.getWebGLErrorMessage;
 import { isMobileDevice } from '../utils';
 
-interface PlantType {
+interface PlanetType {
   cnName: string;
   name: string;
   distance: number;
@@ -31,7 +32,7 @@ interface PlantType {
   revolutionSpeed: number;
   sizeScale: number;
 }
-type PlantTypes = Array<PlantType>;
+type PlanetTypes = Array<PlanetType>;
 type ModeType = 'third-person' | 'first-person';
 
 // 天文单位
@@ -39,7 +40,6 @@ const AU = 1495978700;
 // 距离比例 Math.floor((AU * 1000) / 6371)
 const distanceScale = Math.floor(AU / 6371);
 
-const loadingTextList = ref<string[]>([]);
 const loadingText = ref('');
 let controls: PointerLockControls | OrbitControls;
 let moveForward = false;
@@ -56,6 +56,7 @@ const { innerWidth, innerHeight } = window;
 const mode = ref<ModeType>('third-person');
 const moveSpeed = ref(50000);
 const showModeSelect = ref(true);
+const loadedPlanets = reactive<Group[]>([]); // 已加载的星球模型
 
 const stats = new Stats();
 const scene = new Scene();
@@ -66,12 +67,14 @@ renderer.setPixelRatio(window.devicePixelRatio);
 const directionalLight = new DirectionalLight(0xffffff, 1);
 directionalLight.position.set(-1, 0, 0);
 const ambientLight = new AmbientLight(0xffffff, 0.08);
+const axes = new AxesHelper(Number.MAX_SAFE_INTEGER);
+// scene.add(axes);
 scene.add(ambientLight);
 scene.add(directionalLight);
 
 const loader = new GLTFLoader();
 
-const plants: PlantTypes = [
+const plants: PlanetTypes = [
   {
     cnName: '太阳',
     name: 'sun',
@@ -107,21 +110,18 @@ const plants: PlantTypes = [
   },
 ];
 
-function loadPlanet(plant: PlantType) {
+function loadPlanet(planet: PlanetType) {
   return new Promise<GLTF>((resolve, reject) => {
     loader.load(
-      `models/${plant.name}.glb`,
+      `models/${planet.name}.glb`,
       (GLTF: GLTF) => {
         resolve(GLTF);
       },
       (xhr) => {
         const percent = (xhr.loaded / xhr.total) * 100;
-        if (percent === 100) {
-          // loadingTextList.value.push(`${plant.cnName}加载完成`);
-        } else {
-          // loadingTextList.value.push(`${plant.cnName}加载中...${percent.toFixed(2)}%`);
+        if (typeof percent === 'number' && percent <= 100) {
+          loadingText.value = `${planet.cnName}加载中...${percent.toFixed(2)}%`;
         }
-        loadingText.value = `${plant.cnName}加载中...${percent.toFixed(2)}%`;
       },
       (error) => {
         reject(error);
@@ -131,31 +131,49 @@ function loadPlanet(plant: PlantType) {
 }
 
 function loadPlanets() {
-  plants.forEach(async (plant: PlantType) => {
+  plants.forEach(async (planet: PlanetType) => {
     try {
-      const { scene: plantGroup } = await loadPlanet(plant);
-      plantGroup.name = plant.name;
-      plantGroup.scale.setScalar(plant.sizeScale);
-      plantGroup.position.set(plant.distance, 0, 0);
+      const { scene: plantGroup } = await loadPlanet(planet);
+      plantGroup.name = planet.name;
+      plantGroup.scale.setScalar(planet.sizeScale);
+      plantGroup.position.set(planet.distance, 0, 0);
+      loadedPlanets.push(plantGroup);
       const parentGroup = new Group();
       parentGroup.add(plantGroup);
       scene.add(parentGroup);
     } catch (error) {
       console.error(error);
     } finally {
-      // todo: 加载完成后清除loadingTextList
       loadingText.value = '';
     }
   });
 }
 loadPlanets();
+
 function updateCamera(camera: PerspectiveCamera, position: Vector3) {
   camera.position.copy(position);
+  camera.updateProjectionMatrix();
   if (controls instanceof OrbitControls) {
     controls.update();
   }
 }
-
+watch(loadedPlanets, (value) => {
+  // 按距离由近到远排序
+  value.sort((a, b) => {
+    return a.position.x - b.position.x;
+  });
+  const lastPlanet = value[value.length - 1];
+  if (lastPlanet) {
+    const {
+      position: { x, y, z },
+    } = lastPlanet;
+    const vector3 = new Vector3(x + 3000, y, z - 0);
+    if (controls instanceof OrbitControls) {
+      controls.target.set(x, y, z);
+    }
+    updateCamera(camera, vector3);
+  }
+});
 function onKeyDown(event: KeyboardEvent) {
   switch (event.code) {
     case 'ArrowUp':
@@ -238,6 +256,19 @@ function setControls() {
     }
   } else {
     controls = new OrbitControls(camera, renderer.domElement);
+    // controls.autoRotate = true;
+    // controls.enableDamping = true;
+    controls.keyPanSpeed = 1;
+    controls.panSpeed = 1;
+    controls.rotateSpeed = 0.2;
+    controls.zoomSpeed = 0.2;
+    // controls.screenSpacePanning = true;
+    // controls.keys = {
+    //   LEFT: 'ArrowLeft', // left arrow
+    //   UP: 'ArrowUp', // up arrow
+    //   RIGHT: 'ArrowRight', // right arrow
+    //   BOTTOM: 'ArrowDown', // down arrow
+    // };
     // controls.update() // must be called after any manual changes to the camera's transform
   }
 }
@@ -278,6 +309,9 @@ function animate() {
   requestAnimationFrame(animate);
   if (mode.value === 'first-person') {
     startFirstPersonMode();
+  }
+  if (controls instanceof OrbitControls) {
+    controls.update();
   }
   renderer.render(scene, camera);
   stats.update();
@@ -407,12 +441,6 @@ document.addEventListener('keydown', (event: KeyboardEvent) => {
 
 <template>
   <div class="relative">
-    <!--    <div-->
-    <!--      v-if="loadingTextList.length"-->
-    <!--      class="max-h-200px overflow-scroll color-#fff absolute top-0 left-50% translate-x&#45;&#45;1/2 z-2"-->
-    <!--    >-->
-    <!--      <p v-for="text in loadingTextList" :key="text" class="font-size-20">{{ text }}</p>-->
-    <!--    </div>-->
     <p v-if="loadingText" class="color-#fff absolute top-0 left-50% translate-x&#45;&#45;1/2 z-2">
       {{ loadingText }}
     </p>
