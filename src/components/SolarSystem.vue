@@ -41,6 +41,14 @@ interface PlanetType {
   revolutionSpeed: number;
   sizeScale: number;
 }
+
+interface DockItem {
+  label: string;
+  icon: string;
+  sizeScale: number;
+  position: Vector3;
+}
+
 type PlanetTypes = Array<PlanetType>;
 type ModeType = 'third-person' | 'first-person';
 
@@ -64,7 +72,7 @@ const ambientLightValue = reactive({
   intensity: 0,
 }); // 环境光
 const loadedPlanets = reactive<LoadedPlanet[]>([]); // 已加载的星球模型
-const dockItems = ref<MenuItem[]>([]);
+const dockItems = ref<DockItem[]>([]);
 
 // 1个天文单位
 const AU = 14959787000;
@@ -555,7 +563,7 @@ watch(loadedPlanets, (value) => {
     <Dock :model="dockItems" position="bottom">
       <template #icon="{ item }">
         <a v-tooltip.top="item.label" href="#" class="p-dock-action" @click="onDockItemClick(item)">
-          <img class="cursor-pointer w-full" :alt="item.label" :src="item.icon" />
+          <img class="cursor-pointer w-full" :src="item.icon" />
         </a>
       </template>
     </Dock>
