@@ -16,6 +16,8 @@
   },
   "dependencies": {
     "pinia": "^2.0.12",
+    "primeicons": "^5.0.0",
+    "primevue": "^3.12.2",
     "stats.js": "^0.17.0",
     "three": "^0.138.3",
     "vue": "^3.2.25",

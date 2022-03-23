@@ -1,17 +1,14 @@
 <script setup lang="ts">
-import Dock from 'primevue/dock';
 import Button from 'primevue/button';
-import Slider from 'primevue/slider';
 import InputSwitch from 'primevue/inputswitch';
-import ColorPicker from 'primevue/colorpicker';
-import { MenuItem } from 'primevue/menuitem';
+import Dock from 'primevue/dock';
 import {
   AmbientLight,
+  AxesHelper,
   BufferGeometry,
   DirectionalLight,
   Float32BufferAttribute,
   Group,
-  Light,
   Object3D,
   PerspectiveCamera,
   Points,
@@ -29,10 +26,14 @@ import isWebGLAvailable = WEBGL.isWebGLAvailable;
 import getWebGLErrorMessage = WEBGL.getWebGLErrorMessage;
 import { isMobileDevice } from '../utils';
 
-interface LoadedPlanet extends Group {
-  cnName: string;
-  sizeScale: number;
-}
+// 最终版本需要实现功能：
+// 1. 默认第三人称控制，PC 可切换至第一人称
+// 2. 支持自定义环境光（要有光）
+// 3. 第三人称模式下支持跳转至指定的行星轨道；可选择成为卫星或不成为卫星
+// 4. 支持对当前帧截图生成壁纸；后续考虑生成 gif
+// 5. 增加行星自转开关，可关闭行星自转，默认开启
+// 6. 尝试增加碰撞检测！！！？？？
+
 interface PlanetType {
   cnName: string;
   name: string;
@@ -55,16 +56,12 @@ let prevTime = performance.now();
 const velocity = new Vector3();
 const direction = new Vector3();
 
-const mode = ref<ModeType>((localStorage.getItem('mode') as ModeType) || 'third-person');
+const mode = ref<ModeType>('third-person');
 const loadingText = ref(''); // 加载文字
 const moveSpeed = ref(50000); // 第一人称移动速度
+const showModeSelect = ref(true); // 是否显示选择模式按钮
 const switchRotation = ref(true); // 是否开启星球自转
-const ambientLightValue = reactive({
-  color: '#ffffff',
-  intensity: 0,
-}); // 环境光
-const loadedPlanets = reactive<LoadedPlanet[]>([]); // 已加载的星球模型
-const dockItems = ref<MenuItem[]>([]);
+const loadedPlanets = reactive<Group[]>([]); // 已加载的星球模型
 
 // 1个天文单位
 const AU = 14959787000;
@@ -79,13 +76,16 @@ const renderer = new WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
 // 直线灯光，模拟太阳光
-const directionalLight = new DirectionalLight(0xffffff, 0.5);
-const ambientLight = new AmbientLight(ambientLightValue.color, ambientLightValue.intensity);
+const directionalLight = new DirectionalLight(0xffffff, 1);
 directionalLight.position.set(-1, 0, 0);
+const ambientLight = new AmbientLight(0xffffff, 0.08);
+const axes = new AxesHelper(Number.MAX_SAFE_INTEGER);
+// scene.add(axes);
+// scene.add(ambientLight);
 scene.add(directionalLight);
-scene.add(ambientLight);
 
 const loader = new GLTFLoader();
+
 const plants: PlanetTypes = [
   {
     cnName: '太阳',
@@ -120,41 +120,8 @@ const plants: PlanetTypes = [
     revolutionSpeed: 0.01,
     sizeScale: 0.532,
   },
-  {
-    cnName: '木星',
-    name: 'jupiter',
-    distance: distanceScale * 5.2,
-    rotationSpeed: 0.033,
-    revolutionSpeed: 0.02,
-    sizeScale: 10.97,
-  },
-  {
-    cnName: '土星',
-    name: 'saturn',
-    distance: distanceScale * 9.5,
-    rotationSpeed: 0.35,
-    revolutionSpeed: 0.025,
-    sizeScale: 9.14,
-  },
-  {
-    cnName: '天王星',
-    name: 'uranus',
-    distance: distanceScale * 19.2,
-    rotationSpeed: 0.002,
-    revolutionSpeed: 0.03,
-    sizeScale: 3.95,
-  },
-  {
-    cnName: '海王星',
-    name: 'neptune',
-    distance: distanceScale * 30.1,
-    rotationSpeed: 0.005,
-    revolutionSpeed: 0.033,
-    sizeScale: 3.87,
-  },
 ];
 
-// 加载模型
 function loadPlanet(planet: PlanetType) {
   return new Promise<GLTF>((resolve, reject) => {
     loader.load(
@@ -174,6 +141,7 @@ function loadPlanet(planet: PlanetType) {
     );
   });
 }
+
 function loadPlanets() {
   plants.forEach(async (planet: PlanetType) => {
     try {
@@ -182,7 +150,7 @@ function loadPlanets() {
       plantGroup.scale.setScalar(planet.sizeScale);
       plantGroup.position.set(planet.distance, 0, 0);
       if (mode.value === 'third-person') {
-        loadedPlanets.push(Object.assign(plantGroup, { cnName: planet.cnName, sizeScale: planet.sizeScale }));
+        loadedPlanets.push(plantGroup);
       }
       const parentGroup = new Group();
       parentGroup.add(plantGroup);
@@ -195,7 +163,6 @@ function loadPlanets() {
   });
 }
 
-// 更新相机位置
 function updateCamera(position: Vector3) {
   camera.position.copy(position);
   camera.updateProjectionMatrix();
@@ -203,85 +170,24 @@ function updateCamera(position: Vector3) {
     controls.update();
   }
 }
-function updateControlsTarget(position: Vector3, sizeScale: number) {
-  const { x, y, z } = position;
-  if (controls instanceof OrbitControls) {
-    controls.target.set(x, y, z);
+watch(loadedPlanets, (value) => {
+  // 按距离由近到远排序
+  value.sort((a, b) => {
+    return a.position.x - b.position.x;
+  });
+  const lastPlanet = value[value.length - 1];
+  if (lastPlanet) {
+    const {
+      position: { x, y, z },
+    } = lastPlanet;
+    const vector3 = new Vector3(x + 5000, y + 500, z);
+    if (controls instanceof OrbitControls) {
+      controls.target.set(x, y, z);
+    }
+    updateCamera(vector3);
   }
-  let offsetX = 5000;
-  let offsetY = 500;
-  if (sizeScale) {
-    offsetX *= sizeScale;
-    offsetY *= sizeScale;
-  }
-  const vector3 = new Vector3(x + offsetX, y + offsetY, z);
-  updateCamera(vector3);
-}
-// 设置背景
-function setStartBackground(scene: Scene) {
-  // 生成繁星背景
-  const r = Number.MAX_SAFE_INTEGER;
-  const starsGeometry = [new BufferGeometry(), new BufferGeometry()];
+});
 
-  const vertices1 = [];
-  const vertices2 = [];
-
-  const vertex = new Vector3();
-
-  for (let i = 0; i < 250; i += 1) {
-    vertex.x = Math.random() * 2 - 1;
-    vertex.y = Math.random() * 2 - 1;
-    vertex.z = Math.random() * 2 - 1;
-    vertex.multiplyScalar(r);
-
-    vertices1.push(vertex.x, vertex.y, vertex.z);
-  }
-
-  for (let i = 0; i < 1500; i += 1) {
-    vertex.x = Math.random() * 2 - 1;
-    vertex.y = Math.random() * 2 - 1;
-    vertex.z = Math.random() * 2 - 1;
-    vertex.multiplyScalar(r);
-
-    vertices2.push(vertex.x, vertex.y, vertex.z);
-  }
-
-  starsGeometry[0].setAttribute('position', new Float32BufferAttribute(vertices1, 3));
-  starsGeometry[1].setAttribute('position', new Float32BufferAttribute(vertices2, 3));
-
-  const starsMaterials = [
-    new PointsMaterial({ color: 0x555555, size: 2, sizeAttenuation: false }),
-    new PointsMaterial({ color: 0x555555, size: 1, sizeAttenuation: false }),
-    new PointsMaterial({ color: 0x333333, size: 2, sizeAttenuation: false }),
-    new PointsMaterial({ color: 0x3a3a3a, size: 1, sizeAttenuation: false }),
-    new PointsMaterial({ color: 0x1a1a1a, size: 2, sizeAttenuation: false }),
-    new PointsMaterial({ color: 0x1a1a1a, size: 1, sizeAttenuation: false }),
-  ];
-
-  for (let i = 10; i < 30; i += 1) {
-    const stars = new Points(starsGeometry[i % 2], starsMaterials[i % 6]);
-
-    stars.rotation.x = Math.random() * 6;
-    stars.rotation.y = Math.random() * 6;
-    stars.rotation.z = Math.random() * 6;
-    stars.scale.setScalar(i * 10);
-
-    stars.matrixAutoUpdate = false;
-    stars.updateMatrix();
-
-    scene.add(stars);
-  }
-}
-function screenshot() {
-  //  在截图之前先渲染一下场景和相机，就不会实时刷新屏幕，导致截屏下来的是空白了
-  renderer.render(scene, camera);
-  const a = document.createElement('a');
-  a.href = renderer.domElement.toDataURL('image/png');
-  a.download = 'solar-system.png';
-  a.click();
-}
-
-// 各种事件监听
 function onKeyDown(event: KeyboardEvent) {
   switch (event.code) {
     case 'ArrowUp':
@@ -337,28 +243,7 @@ function onKeyUp(event: KeyboardEvent) {
       break;
   }
 }
-function onDockItemClick(item: MenuItem) {
-  updateControlsTarget(item.position, item.sizeScale);
-}
-function onModeChange() {
-  mode.value = mode.value === 'third-person' ? 'first-person' : 'third-person';
-  // todo 切换模式
-  localStorage.setItem('mode', mode.value);
-  window.location.reload();
-}
-document.addEventListener('keydown', (event: KeyboardEvent) => {
-  if (event.ctrlKey && event.code === 'KeyA') {
-    screenshot();
-  }
-});
-function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
 
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
-// 初始化
 function startFirstPersonMode() {
   const time = performance.now();
 
@@ -399,12 +284,26 @@ function startThirdPersonMode() {
         const planet = plants.find((planet) => planet.name === plantGroup.name);
         if (planet) {
           // eslint-disable-next-line no-param-reassign
-          plantGroup.rotation.y += planet.revolutionSpeed * 0.3;
+          plantGroup.rotation.y += planet.revolutionSpeed * 0.05;
         }
       }
     });
   }
 }
+function animate() {
+  requestAnimationFrame(animate);
+  if (mode.value === 'first-person') {
+    startFirstPersonMode();
+  } else {
+    startThirdPersonMode();
+  }
+  if (controls instanceof OrbitControls) {
+    controls.update();
+  }
+  renderer.render(scene, camera);
+  stats.update();
+}
+
 function initFirstPersonMode() {
   // 初始化控制器
   controls = new PointerLockControls(camera, document.body);
@@ -433,11 +332,13 @@ function initFirstPersonMode() {
   // todo: 设置理想的摄像机位置
   updateCamera(new Vector3(0, 0, 200000));
 }
+
 function initThirdPersonMode() {
+  // camera.up.set(0, 0, -1);
   // 初始化控制器
   controls = new OrbitControls(camera, renderer.domElement);
   controls.listenToKeyEvents(document.body);
-  controls.rotateSpeed = 0.5;
+  controls.rotateSpeed = 0.2;
   controls.zoomSpeed = 0.5;
   // 初始化相机位置
   updateCamera(new Vector3(200000, 0, 12000));
@@ -445,23 +346,10 @@ function initThirdPersonMode() {
   const ambientLight = new AmbientLight(0xffffff, 0.8);
   scene.add(ambientLight);
 }
-function animate() {
-  requestAnimationFrame(animate);
-  if (mode.value === 'first-person') {
-    startFirstPersonMode();
-  } else {
-    startThirdPersonMode();
-  }
-  if (controls instanceof OrbitControls) {
-    controls.update();
-  }
-  renderer.render(scene, camera);
-  stats.update();
-}
+
 function init() {
   const solarSystemContainer = document.getElementById('solar-system') as HTMLElement;
   solarSystemContainer.appendChild(renderer.domElement);
-  setStartBackground(scene);
   loadPlanets();
   document.body.appendChild(stats.dom);
   if (mode.value === 'first-person') {
@@ -475,49 +363,114 @@ function init() {
     const warning = getWebGLErrorMessage();
     solarSystemContainer.appendChild(warning);
   }
-  window.addEventListener('resize', onWindowResize);
 }
 
+function setStartBackground(scene: Scene) {
+  // 生成繁星背景
+  const r = Number.MAX_SAFE_INTEGER;
+  const starsGeometry = [new BufferGeometry(), new BufferGeometry()];
+
+  const vertices1 = [];
+  const vertices2 = [];
+
+  const vertex = new Vector3();
+
+  for (let i = 0; i < 250; i += 1) {
+    vertex.x = Math.random() * 2 - 1;
+    vertex.y = Math.random() * 2 - 1;
+    vertex.z = Math.random() * 2 - 1;
+    vertex.multiplyScalar(r);
+
+    vertices1.push(vertex.x, vertex.y, vertex.z);
+  }
+
+  for (let i = 0; i < 1500; i += 1) {
+    vertex.x = Math.random() * 2 - 1;
+    vertex.y = Math.random() * 2 - 1;
+    vertex.z = Math.random() * 2 - 1;
+    vertex.multiplyScalar(r);
+
+    vertices2.push(vertex.x, vertex.y, vertex.z);
+  }
+
+  starsGeometry[0].setAttribute('position', new Float32BufferAttribute(vertices1, 3));
+  starsGeometry[1].setAttribute('position', new Float32BufferAttribute(vertices2, 3));
+
+  const starsMaterials = [
+    new PointsMaterial({ color: 0x555555, size: 2, sizeAttenuation: false }),
+    new PointsMaterial({ color: 0x555555, size: 1, sizeAttenuation: false }),
+    new PointsMaterial({ color: 0x333333, size: 2, sizeAttenuation: false }),
+    new PointsMaterial({ color: 0x3a3a3a, size: 1, sizeAttenuation: false }),
+    new PointsMaterial({ color: 0x1a1a1a, size: 2, sizeAttenuation: false }),
+    new PointsMaterial({ color: 0x1a1a1a, size: 1, sizeAttenuation: false }),
+  ];
+
+  for (let i = 10; i < 30; i += 1) {
+    const stars = new Points(starsGeometry[i % 2], starsMaterials[i % 6]);
+
+    stars.rotation.x = Math.random() * 6;
+    stars.rotation.y = Math.random() * 6;
+    stars.rotation.z = Math.random() * 6;
+    stars.scale.setScalar(i * 10);
+
+    stars.matrixAutoUpdate = false;
+    stars.updateMatrix();
+
+    scene.add(stars);
+  }
+}
+setStartBackground(scene);
+function selectMode(selectedMode: ModeType) {
+  showModeSelect.value = false;
+  mode.value = selectedMode;
+  init();
+}
 onMounted(() => {
   if (isMobileDevice()) {
-    // 手机只支持第三人称模式
+    showModeSelect.value = false;
     mode.value = 'third-person';
+    init();
   }
-  init();
+  // todo: 开发完注释掉
+  // else {
+  //   selectMode('third-person');
+  // }
 });
 
-watch(ambientLightValue, (value) => {
-  const { color, intensity }: { color: string; intensity: number } = value;
-  const lightColor = color.startsWith('#') ? color : `#${color}`;
-  ambientLight.copy(new AmbientLight(lightColor, intensity));
-});
-watch(loadedPlanets, (value) => {
-  // 按距离由近到远排序
-  value.sort((a, b) => {
-    return a.position.x - b.position.x;
-  });
-  dockItems.value = value.map((planet) => {
-    const { cnName, name, position, sizeScale } = planet;
-    return {
-      label: cnName,
-      icon: `src/assets/images/${name}.png`,
-      position,
-      sizeScale,
-    };
-  });
-  const lastPlanet = value[value.length - 1];
-  if (lastPlanet) {
-    updateControlsTarget(lastPlanet.position, lastPlanet.sizeScale);
+function screenshot() {
+  //  在截图之前先渲染一下场景和相机，就不会实时刷新屏幕，导致截屏下来的是空白了
+  renderer.render(scene, camera);
+  const a = document.createElement('a');
+  a.href = renderer.domElement.toDataURL('image/png');
+  a.download = 'solar-system.png';
+  a.click();
+}
+
+document.addEventListener('keydown', (event: KeyboardEvent) => {
+  if (event.ctrlKey && event.code === 'KeyA') {
+    screenshot();
   }
 });
+const items = ref([
+  {
+    label: 'Finder',
+    icon: 'src/assets/logo.png',
+  },
+]);
 </script>
 
 <template>
-  <div class="relative bg-gray/300">
+  <div class="relative bg-black h-100vh">
     <p v-if="loadingText" class="color-#fff absolute top-0 left-50% translate-x&#45;&#45;1/2 z-2">
       {{ loadingText }}
     </p>
-    <div v-if="mode === 'first-person'" id="blocker" class="absolute w-full h-full bg-black/50">
+    <!--    <InputSwitch class="absolute top-0 right-150px" @click="switchRotation = !switchRotation">-->
+    <!--      {{ switchRotation ? '关闭' : '开启' }}自转-->
+    <!--    </InputSwitch>-->
+    <!--    <Button class="p-button-sm absolute right-0 top-0" @click="screenshot">-->
+    <!--      生成壁纸<template v-if="!isMobileDevice()">(ctrl + A)</template>-->
+    <!--    </Button>-->
+    <div v-show="mode === 'first-person'" id="blocker" class="absolute w-full h-full bg-black/50">
       <div
         id="instructions"
         class="w-full h-full flex cursor-pointer fontSize-14px justify-center items-center flex-col"
@@ -529,47 +482,8 @@ watch(loadedPlanets, (value) => {
         </p>
       </div>
     </div>
-    <div class="absolute top-10px right-10px glass">
-      <div class="my-15px flex justify-center items-center">
-        <span>星球自转： </span>
-        <InputSwitch v-model="switchRotation" />
-      </div>
-      <div class="my-15px flex justify-center items-center">
-        <span>环境光颜色：</span>
-        <ColorPicker v-model="ambientLightValue.color" :color="ambientLightValue.color"></ColorPicker>
-      </div>
-      <p class="my-15px">环境光强度：</p>
-      <Slider v-model="ambientLightValue.intensity" class="mb-20px" :min="0" :max="1" :step="0.01" />
-
-      <div class="my-15px flex justify-center items-center">
-        <Button class="p-button-sm" @click="onModeChange">
-          {{ mode === 'first-person' ? '上帝模式' : '第一人称模式' }}
-        </Button>
-      </div>
-      <div class="my-15px flex justify-center items-center">
-        <Button class="p-button-sm p-button-raised" @click="screenshot">
-          生成壁纸<template v-if="!isMobileDevice()">(ctrl + A)</template>
-        </Button>
-      </div>
-    </div>
-    <Dock :model="dockItems" position="bottom">
-      <template #icon="{ item }">
-        <a v-tooltip.top="item.label" href="#" class="p-dock-action" @click="onDockItemClick(item)">
-          <img class="cursor-pointer w-full" :alt="item.label" :src="item.icon" />
-        </a>
-      </template>
-    </Dock>
     <div id="solar-system"></div>
   </div>
 </template>
 
-<style scoped>
-.glass {
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  background-color: rgba(17, 25, 40, 0.2);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 15px 20px;
-}
-</style>
+<style scoped></style>

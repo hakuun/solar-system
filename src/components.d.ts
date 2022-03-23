@@ -8,6 +8,7 @@ declare module 'vue' {
     SolarSystem: typeof import('./components/SolarSystem.vue')['default']
     SolarSystem1: typeof import('./components/SolarSystem1.vue')['default']
     SolarSystem2: typeof import('./components/SolarSystem2.vue')['default']
+    SolarSystem3: typeof import('./components/SolarSystem3.vue')['default']
   }
 }
 
