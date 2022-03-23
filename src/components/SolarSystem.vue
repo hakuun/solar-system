@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { effect } from 'vue';
 import {
   AmbientLight,
   AxesHelper,
@@ -7,8 +6,8 @@ import {
   DirectionalLight,
   Float32BufferAttribute,
   Group,
+  Object3D,
   PerspectiveCamera,
-  Plane,
   Points,
   PointsMaterial,
   Scene,
@@ -24,6 +23,14 @@ import isWebGLAvailable = WEBGL.isWebGLAvailable;
 import getWebGLErrorMessage = WEBGL.getWebGLErrorMessage;
 import { isMobileDevice } from '../utils';
 
+// 最终版本需要实现功能：
+// 1. 默认第三人称控制，PC 可切换至第一人称
+// 2. 支持自定义环境光（要有光）
+// 3. 第三人称模式下支持跳转至指定的行星轨道；可选择成为卫星或不成为卫星
+// 4. 支持对当前帧截图生成壁纸；后续考虑生成 gif
+// 5. 增加行星自转开关，可关闭行星自转，默认开启
+// 6. 尝试增加碰撞检测！！！？？？
+
 interface PlanetType {
   cnName: string;
   name: string;
@@ -35,28 +42,29 @@ interface PlanetType {
 type PlanetTypes = Array<PlanetType>;
 type ModeType = 'third-person' | 'first-person';
 
-// 天文单位
-const AU = 1495978700;
-// 距离比例 Math.floor((AU * 1000) / 6371)
-const distanceScale = Math.floor(AU / 6371);
-
-const loadingText = ref('');
 let controls: PointerLockControls | OrbitControls;
 let moveForward = false;
 let moveBackward = false;
 let moveLeft = false;
 let moveRight = false;
 let canJump = false;
-
 let prevTime = performance.now();
+
 const velocity = new Vector3();
 const direction = new Vector3();
-const { innerWidth, innerHeight } = window;
 
 const mode = ref<ModeType>('third-person');
-const moveSpeed = ref(50000);
-const showModeSelect = ref(true);
+const loadingText = ref(''); // 加载文字
+const moveSpeed = ref(50000); // 第一人称移动速度
+const showModeSelect = ref(true); // 是否显示选择模式按钮
+const switchRotation = ref(true); // 是否开启星球自转
 const loadedPlanets = reactive<Group[]>([]); // 已加载的星球模型
+
+// 1个天文单位
+const AU = 14959787000;
+// 距离比例 Math.floor((AU * 1000) / 6371)
+const distanceScale = Math.floor(AU / 6371); // AU 应该再 * 1000 的，但为了视觉效果，暂时不乘
+const { innerWidth, innerHeight } = window;
 
 const stats = new Stats();
 const scene = new Scene();
@@ -64,12 +72,13 @@ const camera = new PerspectiveCamera(25, innerWidth / innerHeight, 0.1, Number.M
 const renderer = new WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
+// 直线灯光，模拟太阳光
 const directionalLight = new DirectionalLight(0xffffff, 1);
 directionalLight.position.set(-1, 0, 0);
 const ambientLight = new AmbientLight(0xffffff, 0.08);
 const axes = new AxesHelper(Number.MAX_SAFE_INTEGER);
 // scene.add(axes);
-scene.add(ambientLight);
+// scene.add(ambientLight);
 scene.add(directionalLight);
 
 const loader = new GLTFLoader();
@@ -137,7 +146,9 @@ function loadPlanets() {
       plantGroup.name = planet.name;
       plantGroup.scale.setScalar(planet.sizeScale);
       plantGroup.position.set(planet.distance, 0, 0);
-      loadedPlanets.push(plantGroup);
+      if (mode.value === 'third-person') {
+        loadedPlanets.push(plantGroup);
+      }
       const parentGroup = new Group();
       parentGroup.add(plantGroup);
       scene.add(parentGroup);
@@ -148,9 +159,8 @@ function loadPlanets() {
     }
   });
 }
-loadPlanets();
 
-function updateCamera(camera: PerspectiveCamera, position: Vector3) {
+function updateCamera(position: Vector3) {
   camera.position.copy(position);
   camera.updateProjectionMatrix();
   if (controls instanceof OrbitControls) {
@@ -167,13 +177,14 @@ watch(loadedPlanets, (value) => {
     const {
       position: { x, y, z },
     } = lastPlanet;
-    const vector3 = new Vector3(x + 3000, y, z - 0);
+    const vector3 = new Vector3(x + 5000, y + 500, z);
     if (controls instanceof OrbitControls) {
       controls.target.set(x, y, z);
     }
-    updateCamera(camera, vector3);
+    updateCamera(vector3);
   }
 });
+
 function onKeyDown(event: KeyboardEvent) {
   switch (event.code) {
     case 'ArrowUp':
@@ -229,49 +240,6 @@ function onKeyUp(event: KeyboardEvent) {
       break;
   }
 }
-function setControls() {
-  if (mode.value === 'first-person') {
-    controls = new PointerLockControls(camera, document.body);
-    const blocker = document.getElementById('blocker');
-    const instructions = document.getElementById('instructions');
-    if (blocker && instructions) {
-      instructions.addEventListener('click', function () {
-        if (controls instanceof PointerLockControls) {
-          controls.lock();
-        }
-      });
-      controls.addEventListener('lock', function () {
-        instructions.style.display = 'none';
-        blocker.style.display = 'none';
-      });
-
-      controls.addEventListener('unlock', function () {
-        blocker.style.display = 'block';
-        instructions.style.display = '';
-      });
-      scene.add(controls.getObject());
-
-      document.addEventListener('keydown', onKeyDown);
-      document.addEventListener('keyup', onKeyUp);
-    }
-  } else {
-    controls = new OrbitControls(camera, renderer.domElement);
-    // controls.autoRotate = true;
-    // controls.enableDamping = true;
-    controls.keyPanSpeed = 1;
-    controls.panSpeed = 1;
-    controls.rotateSpeed = 0.2;
-    controls.zoomSpeed = 0.2;
-    // controls.screenSpacePanning = true;
-    // controls.keys = {
-    //   LEFT: 'ArrowLeft', // left arrow
-    //   UP: 'ArrowUp', // up arrow
-    //   RIGHT: 'ArrowRight', // right arrow
-    //   BOTTOM: 'ArrowDown', // down arrow
-    // };
-    // controls.update() // must be called after any manual changes to the camera's transform
-  }
-}
 
 function startFirstPersonMode() {
   const time = performance.now();
@@ -304,11 +272,27 @@ function startFirstPersonMode() {
 
   prevTime = time;
 }
-
+function startThirdPersonMode() {
+  if (switchRotation.value) {
+    const planetNames = plants.map((planet) => planet.name);
+    scene.traverse((object: Object3D) => {
+      if (object.name && planetNames.includes(object.name)) {
+        const plantGroup = object as Group;
+        const planet = plants.find((planet) => planet.name === plantGroup.name);
+        if (planet) {
+          // eslint-disable-next-line no-param-reassign
+          plantGroup.rotation.y += planet.revolutionSpeed * 0.05;
+        }
+      }
+    });
+  }
+}
 function animate() {
   requestAnimationFrame(animate);
   if (mode.value === 'first-person') {
     startFirstPersonMode();
+  } else {
+    startThirdPersonMode();
   }
   if (controls instanceof OrbitControls) {
     controls.update();
@@ -318,19 +302,44 @@ function animate() {
 }
 
 function initFirstPersonMode() {
+  // 初始化控制器
+  controls = new PointerLockControls(camera, document.body);
+  const blocker = document.getElementById('blocker');
+  const instructions = document.getElementById('instructions');
+  if (blocker && instructions) {
+    instructions.addEventListener('click', function () {
+      if (controls instanceof PointerLockControls) {
+        controls.lock();
+      }
+    });
+    controls.addEventListener('lock', function () {
+      instructions.style.display = 'none';
+      blocker.style.display = 'none';
+    });
+
+    controls.addEventListener('unlock', function () {
+      blocker.style.display = 'block';
+      instructions.style.display = '';
+    });
+    scene.add(controls.getObject());
+
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+  }
   // todo: 设置理想的摄像机位置
-  updateCamera(camera, new Vector3(-5000, 0, 200000));
+  updateCamera(new Vector3(0, 0, 200000));
 }
 
 function initThirdPersonMode() {
-  // todo: 根据选择的行星设置摄像机的位置
-  updateCamera(camera, new Vector3(200000, 0, 12000));
-  const plantNames = plants.map((p) => p.name);
-  scene.traverse((object) => {
-    if (object.name && plantNames.includes(object.name)) {
-      console.log('traverse', object);
-    }
-  });
+  // camera.up.set(0, 0, -1);
+  // 初始化控制器
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.listenToKeyEvents(document.body);
+  controls.rotateSpeed = 0.2;
+  controls.zoomSpeed = 0.5;
+  // 初始化相机位置
+  updateCamera(new Vector3(200000, 0, 12000));
+  // 添加环境光
   const ambientLight = new AmbientLight(0xffffff, 0.8);
   scene.add(ambientLight);
 }
@@ -338,13 +347,13 @@ function initThirdPersonMode() {
 function init() {
   const solarSystemContainer = document.getElementById('solar-system') as HTMLElement;
   solarSystemContainer.appendChild(renderer.domElement);
+  loadPlanets();
   document.body.appendChild(stats.dom);
   if (mode.value === 'first-person') {
     initFirstPersonMode();
   } else {
     initThirdPersonMode();
   }
-  setControls();
   if (isWebGLAvailable()) {
     animate();
   } else {
@@ -418,9 +427,11 @@ onMounted(() => {
     showModeSelect.value = false;
     mode.value = 'third-person';
     init();
-  } else {
-    selectMode('third-person');
   }
+  // todo: 开发完注释掉
+  // else {
+  //   selectMode('third-person');
+  // }
 });
 
 function screenshot() {
@@ -440,15 +451,20 @@ document.addEventListener('keydown', (event: KeyboardEvent) => {
 </script>
 
 <template>
-  <div class="relative">
+  <div class="relative bg-black">
     <p v-if="loadingText" class="color-#fff absolute top-0 left-50% translate-x&#45;&#45;1/2 z-2">
       {{ loadingText }}
     </p>
-    <div v-if="showModeSelect" class="w-100vw h-100vh color-#fff absolute left-50% translate-x--1/2 bg-gray-700/20">
-      选择模式：
-      <button @click="selectMode('third-person')">上帝视角</button>
-      <button @click="selectMode('first-person')">第一人称视角</button>
+    <div v-if="showModeSelect" class="custom-bg w-100vw h-100vh flex flex-col justify-center items-center">
+      <div class="flex justify-center items-center glass w-full h-full relative">
+        <h1 class="color-#fff absolute">选择操作模式</h1>
+        <div class="card color-#fff" @click="selectMode('first-person')">第一人称视角</div>
+        <div class="card color-#fff" @click="selectMode('third-person')">第三人视角</div>
+      </div>
     </div>
+    <button class="absolute top-0 right-150px" @click="switchRotation = !switchRotation">
+      {{ switchRotation ? '关闭' : '开启' }}自转
+    </button>
     <button class="absolute right-0 top-0" @click="screenshot">
       生成壁纸<template v-if="!isMobileDevice()">(ctrl + A)</template>
     </button>
@@ -459,9 +475,8 @@ document.addEventListener('keydown', (event: KeyboardEvent) => {
       >
         <p style="font-size: 36px">点击开始</p>
         <p>
-          Move: WASD<br />
-          Jump: SPACE<br />
-          Look: MOUSE
+          移动: WASD<br />
+          暂停: ESC<br />
         </p>
       </div>
     </div>
@@ -469,4 +484,24 @@ document.addEventListener('keydown', (event: KeyboardEvent) => {
   </div>
 </template>
 
-<style scoped></style>
+<style scoped>
+.custom-bg {
+  background-image: url('src/assets/images/bg.png');
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
+.glass {
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  background-color: rgba(17, 25, 40, 0.54);
+}
+.card {
+  backdrop-filter: blur(15px) saturate(180%);
+  -webkit-backdrop-filter: blur(15px) saturate(180%);
+  background-color: rgba(0, 0, 0, 0.54);
+  border-radius: 12px;
+  height: 200px;
+  border: 1px solid rgba(255, 255, 255, 0.125);
+  cursor: pointer;
+}
+</style>
