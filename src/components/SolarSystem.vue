@@ -198,7 +198,7 @@ function loadPlanet(planet: PlanetType) {
       },
       (xhr) => {
         const percent = (xhr.loaded / xhr.total) * 100;
-        if (typeof percent === 'number' && percent <= 100) {
+        if (percent <= 100) {
           loadingText.value = `${planet.cnName}加载中...${percent.toFixed(2)}%`;
         }
       },
@@ -459,7 +459,7 @@ function initThirdPersonMode() {
   controls.rotateSpeed = 0.5;
   controls.zoomSpeed = 0.5;
   // 初始化相机位置
-  updateCamera(new Vector3(220000, 0, 150000));
+  updateCamera(new Vector3(220000, 0, 200000));
   // 添加环境光
   const ambientLight = new AmbientLight(0xffffff, 0.8);
   scene.add(ambientLight);
@@ -499,7 +499,7 @@ function init() {
 
 onMounted(() => {
   if (isMobileDevice()) {
-    toast.add({ severity: 'info', summary: '温馨提示', detail: '建议使用 PC 体验效果最佳', life: 3000 });
+    toast.add({ severity: 'info', summary: '温馨提示', detail: '推荐使用 PC 体验', life: 5000 });
     // 手机只支持第三人称模式
     mode.value = 'third-person';
   }
