@@ -4,6 +4,8 @@ import Button from 'primevue/button';
 import Slider from 'primevue/slider';
 import InputSwitch from 'primevue/inputswitch';
 import ColorPicker from 'primevue/colorpicker';
+import Toast from 'primevue/toast';
+import { useToast } from 'primevue/usetoast';
 import { MenuItem } from 'primevue/menuitem';
 import {
   AmbientLight,
@@ -11,7 +13,6 @@ import {
   DirectionalLight,
   Float32BufferAttribute,
   Group,
-  Light,
   Object3D,
   PerspectiveCamera,
   Points,
@@ -63,10 +64,14 @@ let prevTime = performance.now();
 const velocity = new Vector3();
 const direction = new Vector3();
 
-const mode = ref<ModeType>((localStorage.getItem('mode') as ModeType) || 'third-person');
+const toast = useToast();
+const mode = ref<ModeType>('third-person');
 const loadingText = ref(''); // 加载文字
 const moveSpeed = ref(50000); // 第一人称移动速度
 const switchRotation = ref(true); // 是否开启星球自转
+const autoRotate = ref(true); // 是否开启围绕星球旋转
+const autoRotateSpeed = ref(0.5); // 是否开启围绕星球旋转
+const showOption = ref(true); // 是否显示选项
 const ambientLightValue = reactive({
   color: '#ffffff',
   intensity: 0,
@@ -75,9 +80,9 @@ const loadedPlanets = reactive<LoadedPlanet[]>([]); // 已加载的星球模型
 const dockItems = ref<DockItem[]>([]);
 
 // 1个天文单位
-const AU = 14959787000;
-// 距离比例 Math.floor((AU * 1000) / 6371)
-const distanceScale = Math.floor(AU / 6371); // AU 应该再 * 1000 的，但为了视觉效果，暂时不乘
+const AU = 149597871;
+// 距离比例 Math.floor((AU * 1000) / 6371 * 2)
+const distanceScale = Math.floor((AU * 1000) / 12742);
 const { innerWidth, innerHeight } = window;
 
 const stats = new Stats();
@@ -101,7 +106,7 @@ const plants: PlanetTypes = [
     distance: 0,
     rotationSpeed: 0,
     revolutionSpeed: 0.004,
-    sizeScale: 30,
+    sizeScale: 109.5,
   },
   {
     cnName: '水星',
@@ -161,7 +166,28 @@ const plants: PlanetTypes = [
     sizeScale: 3.87,
   },
 ];
-
+// 更新相机位置
+function updateCamera(position: Vector3) {
+  camera.position.copy(position);
+  camera.updateProjectionMatrix();
+  if (controls instanceof OrbitControls) {
+    controls.update();
+  }
+}
+function updateControlsTarget(position: Vector3, sizeScale: number) {
+  const { x, y, z } = position;
+  if (controls instanceof OrbitControls) {
+    controls.target.set(x, y, z);
+  }
+  let offsetX = 5000;
+  let offsetY = 500;
+  if (sizeScale) {
+    offsetX *= sizeScale;
+    offsetY *= sizeScale;
+  }
+  const vector3 = new Vector3(x + offsetX, y + offsetY, z);
+  updateCamera(vector3);
+}
 // 加载模型
 function loadPlanet(planet: PlanetType) {
   return new Promise<GLTF>((resolve, reject) => {
@@ -191,6 +217,9 @@ function loadPlanets() {
       plantGroup.position.set(planet.distance, 0, 0);
       if (mode.value === 'third-person') {
         loadedPlanets.push(Object.assign(plantGroup, { cnName: planet.cnName, sizeScale: planet.sizeScale }));
+        if (planet.name === 'earth') {
+          updateControlsTarget(plantGroup.position, planet.sizeScale);
+        }
       }
       const parentGroup = new Group();
       parentGroup.add(plantGroup);
@@ -203,28 +232,6 @@ function loadPlanets() {
   });
 }
 
-// 更新相机位置
-function updateCamera(position: Vector3) {
-  camera.position.copy(position);
-  camera.updateProjectionMatrix();
-  if (controls instanceof OrbitControls) {
-    controls.update();
-  }
-}
-function updateControlsTarget(position: Vector3, sizeScale: number) {
-  const { x, y, z } = position;
-  if (controls instanceof OrbitControls) {
-    controls.target.set(x, y, z);
-  }
-  let offsetX = 5000;
-  let offsetY = 500;
-  if (sizeScale) {
-    offsetX *= sizeScale;
-    offsetY *= sizeScale;
-  }
-  const vector3 = new Vector3(x + offsetX, y + offsetY, z);
-  updateCamera(vector3);
-}
 // 设置背景
 function setStartBackground(scene: Scene) {
   // 生成繁星背景
@@ -350,7 +357,6 @@ function onDockItemClick(item: MenuItem) {
 }
 function onModeChange() {
   mode.value = mode.value === 'third-person' ? 'first-person' : 'third-person';
-  // todo 切换模式
   localStorage.setItem('mode', mode.value);
   window.location.reload();
 }
@@ -399,6 +405,11 @@ function startFirstPersonMode() {
   prevTime = time;
 }
 function startThirdPersonMode() {
+  if (controls instanceof OrbitControls) {
+    controls.autoRotate = autoRotate.value;
+    controls.autoRotateSpeed = autoRotateSpeed.value;
+  }
+
   if (switchRotation.value) {
     const planetNames = plants.map((planet) => planet.name);
     scene.traverse((object: Object3D) => {
@@ -448,7 +459,7 @@ function initThirdPersonMode() {
   controls.rotateSpeed = 0.5;
   controls.zoomSpeed = 0.5;
   // 初始化相机位置
-  updateCamera(new Vector3(200000, 0, 12000));
+  updateCamera(new Vector3(220000, 0, 150000));
   // 添加环境光
   const ambientLight = new AmbientLight(0xffffff, 0.8);
   scene.add(ambientLight);
@@ -488,6 +499,7 @@ function init() {
 
 onMounted(() => {
   if (isMobileDevice()) {
+    toast.add({ severity: 'info', summary: '温馨提示', detail: '建议使用 PC 体验效果最佳', life: 3000 });
     // 手机只支持第三人称模式
     mode.value = 'third-person';
   }
@@ -504,25 +516,28 @@ watch(loadedPlanets, (value) => {
   value.sort((a, b) => {
     return a.position.x - b.position.x;
   });
-  dockItems.value = value.map((planet) => {
-    const { cnName, name, position, sizeScale } = planet;
-    return {
-      label: cnName,
-      icon: `src/assets/images/${name}.png`,
-      position,
-      sizeScale,
-    };
-  });
-  const lastPlanet = value[value.length - 1];
-  if (lastPlanet) {
-    updateControlsTarget(lastPlanet.position, lastPlanet.sizeScale);
+  if (value.length === 9) {
+    dockItems.value = value.map((planet) => {
+      const { cnName, name, position, sizeScale } = planet;
+      return {
+        label: cnName,
+        icon: `/images/${name}.png`,
+        position,
+        sizeScale,
+      };
+    });
   }
+  // const lastPlanet = value[value.length - 1];
+  // if (lastPlanet) {
+  //   updateControlsTarget(lastPlanet.position, lastPlanet.sizeScale);
+  // }
 });
 </script>
 
 <template>
   <div class="relative bg-gray/300">
-    <p v-if="loadingText" class="color-#fff absolute top-0 left-50% translate-x&#45;&#45;1/2 z-2">
+    <Toast position="top-center" />
+    <p v-if="loadingText" class="color-#fff absolute top-0 left-50% translate-x--1/2 z-2">
       {{ loadingText }}
     </p>
     <div v-if="mode === 'first-person'" id="blocker" class="absolute w-full h-full bg-black/50">
@@ -537,30 +552,54 @@ watch(loadedPlanets, (value) => {
         </p>
       </div>
     </div>
-    <div class="absolute top-10px right-10px glass">
-      <div class="my-15px flex justify-center items-center">
-        <span>星球自转： </span>
-        <InputSwitch v-model="switchRotation" />
-      </div>
-      <div class="my-15px flex justify-center items-center">
-        <span>环境光颜色：</span>
-        <ColorPicker v-model="ambientLightValue.color" :color="ambientLightValue.color"></ColorPicker>
-      </div>
-      <p class="my-15px">环境光强度：</p>
-      <Slider v-model="ambientLightValue.intensity" class="mb-20px" :min="0" :max="1" :step="0.01" />
-
-      <div class="my-15px flex justify-center items-center">
-        <Button class="p-button-sm" @click="onModeChange">
-          {{ mode === 'first-person' ? '上帝模式' : '第一人称模式' }}
-        </Button>
-      </div>
-      <div class="my-15px flex justify-center items-center">
-        <Button class="p-button-sm p-button-raised" @click="screenshot">
-          生成壁纸<template v-if="!isMobileDevice()">(ctrl + A)</template>
-        </Button>
+    <div class="absolute top-10px right-10px color-#fff">
+      <i
+        :class="[
+          showOption ? 'right-192px' : 'right-10px',
+          'pi',
+          'pi-bars',
+          'absolute',
+          'top-10px',
+          'z-3',
+          'ease-in',
+          'duration-300',
+          'cursor-pointer',
+          'glass',
+        ]"
+        @click="showOption = !showOption"
+      ></i>
+      <div :class="['glass', 'ease-in', 'duration-300', showOption ? 'fold-container' : 'unfold-container']">
+        <div class="my-15px flex justify-center items-center">
+          <span>星球自转： </span>
+          <InputSwitch v-model="switchRotation" />
+        </div>
+        <div class="my-15px flex justify-center items-center">
+          <span>围绕星球旋转： </span>
+          <InputSwitch v-model="autoRotate" />
+        </div>
+        <div v-if="autoRotate" class="my-15px">
+          <p class="my-15px">旋转速度：</p>
+          <Slider v-model="autoRotateSpeed" class="mb-20px" :min="0" :max="3" :step="0.1" />
+        </div>
+        <div class="my-15px flex justify-center items-center">
+          <span>环境光颜色：</span>
+          <ColorPicker v-model="ambientLightValue.color" :color="ambientLightValue.color"></ColorPicker>
+        </div>
+        <p class="my-15px">环境光强度：</p>
+        <Slider v-model="ambientLightValue.intensity" class="mb-20px" :min="0" :max="1" :step="0.01" />
+        <!--        <div class="my-15px flex justify-center items-center">-->
+        <!--          <Button class="p-button-sm" @click="onModeChange">-->
+        <!--            {{ mode === 'first-person' ? '上帝模式' : '第一人称模式' }}-->
+        <!--          </Button>-->
+        <!--        </div>-->
+        <div class="my-15px flex justify-center items-center">
+          <Button class="p-button-sm p-button-raised" @click="screenshot">
+            生成壁纸<template v-if="!isMobileDevice()">(ctrl + A)</template>
+          </Button>
+        </div>
       </div>
     </div>
-    <Dock :model="dockItems" position="bottom">
+    <Dock v-if="dockItems.length" :model="dockItems" position="bottom">
       <template #icon="{ item }">
         <a v-tooltip.top="item.label" href="#" class="p-dock-action" @click="onDockItemClick(item)">
           <img class="cursor-pointer w-full" :src="item.icon" />
@@ -572,6 +611,12 @@ watch(loadedPlanets, (value) => {
 </template>
 
 <style scoped>
+.fold-container {
+  transform: scale(1);
+}
+.unfold-container {
+  transform: scale(0);
+}
 .glass {
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
@@ -579,5 +624,6 @@ watch(loadedPlanets, (value) => {
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 15px 20px;
+  transform-origin: top right;
 }
 </style>

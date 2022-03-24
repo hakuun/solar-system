@@ -29,7 +29,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': resolve(__dirname, './src'), // 把 @ 指向到 src 目录去
+      '~/': `${resolve(__dirname, 'src')}/`,
     },
   },
   server: {
