@@ -217,9 +217,6 @@ function loadPlanets() {
       plantGroup.position.set(planet.distance, 0, 0);
       if (mode.value === 'third-person') {
         loadedPlanets.push(Object.assign(plantGroup, { cnName: planet.cnName, sizeScale: planet.sizeScale }));
-        if (planet.name === 'earth') {
-          updateControlsTarget(plantGroup.position, planet.sizeScale);
-        }
       }
       const parentGroup = new Group();
       parentGroup.add(plantGroup);
@@ -499,8 +496,8 @@ function init() {
 
 onMounted(() => {
   if (isMobileDevice()) {
-    toast.add({ severity: 'info', summary: '温馨提示', detail: '推荐使用 PC 体验', life: 5000 });
     // 手机只支持第三人称模式
+    toast.add({ severity: 'info', summary: '温馨提示', detail: '建议使用 PC 体验最佳效果', life: 5000 });
     mode.value = 'third-person';
   }
   init();
@@ -516,7 +513,7 @@ watch(loadedPlanets, (value) => {
   value.sort((a, b) => {
     return a.position.x - b.position.x;
   });
-  if (value.length === 9) {
+  if (value.length > 4) {
     dockItems.value = value.map((planet) => {
       const { cnName, name, position, sizeScale } = planet;
       return {
@@ -527,10 +524,10 @@ watch(loadedPlanets, (value) => {
       };
     });
   }
-  // const lastPlanet = value[value.length - 1];
-  // if (lastPlanet) {
-  //   updateControlsTarget(lastPlanet.position, lastPlanet.sizeScale);
-  // }
+  const lastPlanet = value[value.length - 1];
+  if (lastPlanet) {
+    updateControlsTarget(lastPlanet.position, lastPlanet.sizeScale);
+  }
 });
 </script>
 
